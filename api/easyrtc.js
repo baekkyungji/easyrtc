@@ -790,11 +790,17 @@ easyrtc.onError = function(errorObject) {
     errorBody.appendChild(messageNode);
     errorDiv.style.display = "block";
 };
-//
-// add the style sheet to the head of the document. That way, developers
-// can overide it.
-//
-(function() {
+
+/* @private*/
+/** Load Easyrtc Stylesheet.
+ *   Easyrtc Stylesheet define easyrtcMirror class and some basic css class for using easyrtc.js.
+ *   That way, developers can overide it or use it's own css file minified css or package.
+ * @example
+ *       easyrtc.loadStylesheet();
+ *
+ */
+easyrtc.loadStylesheet = function () {
+
     //
     // check to see if we already have an easyrtc.css file loaded
     // if we do, we can exit immediately.
@@ -816,7 +822,8 @@ easyrtc.onError = function(errorObject) {
     var headSection = document.getElementsByTagName("head")[0];
     var firstHead = headSection.childNodes[0];
     headSection.insertBefore(easySheet, firstHead);
-})();
+};
+
 /** @private */
 easyrtc.videoBandwidthString = "b=AS:50"; // default video band width is 50kbps
 
