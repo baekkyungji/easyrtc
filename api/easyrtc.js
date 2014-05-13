@@ -3516,14 +3516,16 @@ easyrtc.connect = function(applicationName, successCallback, errorCallback) {
         for (i = 0; i < iceConfig.iceServers.length; i++) {
             item = iceConfig.iceServers[i];
             if (item.url.indexOf('turn:') === 0) {
-                if (item.username) {
-                    fixedItem = createIceServer(item.url, item.username, item.credential);
+                if (typeof createIceServer === 'function') {
+                    if (item.username) {
+                        fixedItem = createIceServer(item.url, item.username, item.credential);
+                    }
+                    else {
+                        easyrtc.showError("badparam", "Iceserver entry doesn't have a username: " + JSON.stringify(item));
+                    }
+                    ipaddress = item.url.split(/[@:&]/g)[1];
+                    easyrtc._turnServers[ipaddress] = true;
                 }
-                else {
-                    easyrtc.showError("badparam", "Iceserver entry doesn't have a username: " + JSON.stringify(item));
-                }
-                ipaddress = item.url.split(/[@:&]/g)[1];
-                easyrtc._turnServers[ipaddress] = true;
             }
             else { // is stun server entry
                 fixedItem = item;
