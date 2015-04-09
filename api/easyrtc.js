@@ -214,7 +214,7 @@ var Easyrtc = function() {
 //
 // Maps a key to a language specific string using the easyrtc_constantStrings map.
 // Defaults to the key if the key can not be found, but outputs a warning in that case.
-// This function is only used internally by easyrtc.js 
+// This function is only used internally by easyrtc.js
 //
     /**
      * @private
@@ -242,8 +242,8 @@ var Easyrtc = function() {
     // A map of eventListeners. The key is the event type.
     var eventListeners = {};
 
-    /** This function checks if an attempt was made to add an event listener or 
-     * or emit an unlisted event, since such is typically a typo. 
+    /** This function checks if an attempt was made to add an event listener or
+     * or emit an unlisted event, since such is typically a typo.
      * @private
      * @param {String} eventName
      * @param {String} callingFunction the name of the calling function.
@@ -263,7 +263,7 @@ var Easyrtc = function() {
      * Adds an event listener for a particular type of event.
      * Currently the only eventName supported is "roomOccupant".
      * @param {String} eventName the type of the event
-     * @param {Function} eventListener the function that expects the event. 
+     * @param {Function} eventListener the function that expects the event.
      * The eventListener gets called with the eventName as it's first argument, and the event
      * data as it's second argument.
      * @returns {void}
@@ -285,7 +285,7 @@ var Easyrtc = function() {
     };
 
     /**
-     * Removes an event listener. 
+     * Removes an event listener.
      * @param {String} eventName
      * @param {Function} eventListener
      */
@@ -305,7 +305,7 @@ var Easyrtc = function() {
         }
     };
     /**
-     * Emits an event, or in otherwords, calls all the eventListeners for a 
+     * Emits an event, or in otherwords, calls all the eventListeners for a
      * particular event.
      * @param {String} eventName
      * @param {Object} eventData
@@ -386,7 +386,7 @@ var Easyrtc = function() {
      * Gets a list of the available video sources (ie, cameras)
      * @param {function} callback receives list of {facing:String, label:String, id:String, kind:"video"}
      * Note: the label string always seems to be the empty string if you aren't using https.
-     * Note: not supported by Firefox. 
+     * Note: not supported by Firefox.
      * @example  easyrtc.getVideoSourceList( function(list) {
      *               var i;
      *               for( i = 0; i < list.length; i++ ) {
@@ -626,8 +626,8 @@ var Easyrtc = function() {
     };
     /** This function requests that screen capturing be used to provide the local media source
      * rather than a webcam. If you have multiple screens, they are composited side by side.
-     * Note: this functionality is not supported by Firefox, has to be called before calling initMediaSource (or easyApp), we don't currently supply a way to 
-     * turn it off (once it's on), only works if the website is hosted SSL (https), and the image quality is rather 
+     * Note: this functionality is not supported by Firefox, has to be called before calling initMediaSource (or easyApp), we don't currently supply a way to
+     * turn it off (once it's on), only works if the website is hosted SSL (https), and the image quality is rather
      * poor going across a network because it tries to transmit so much data. In short, screen sharing
      * through WebRTC isn't worth using at this point, but it is provided here so people can try it out.
      * @example
@@ -987,7 +987,7 @@ var Easyrtc = function() {
                         }
 
                         //
-                        // a chrome-firefox connection results in several activeConnections. 
+                        // a chrome-firefox connection results in several activeConnections.
                         // we only want one, so we look for the one with the most data being received on it.
                         //
                         if (partNames[i].googRemoteAddress && partNames[i].googActiveConnection) {
@@ -1519,7 +1519,7 @@ var Easyrtc = function() {
         } else if (typeof element.src !== 'undefined') {
             //noinspection JSUndefinedPropertyAssignment
             element.src = "";
-        } 
+        }
     };
     /**
      *  Sets a video or audio object from a media stream.
@@ -2905,11 +2905,11 @@ var Easyrtc = function() {
                     };
 
                     //
-                    // some candidates include ip addresses of turn servers. we'll want those 
+                    // some candidates include ip addresses of turn servers. we'll want those
                     // later so we can see if our actual connection uses a turn server.
-                    // The keyword "relay" in the candidate identifies it as referencing a 
+                    // The keyword "relay" in the candidate identifies it as referencing a
                     // turn server. The \d symbol in the regular expression matches a number.
-                    // 
+                    //
                     if (event.candidate.candidate.indexOf("typ relay") > 0) {
                         var ipAddress = event.candidate.candidate.match(/(udp|tcp) \d+ (\d+\.\d+\.\d+\.\d+)/i)[2];
                         self._turnServers[ipAddress] = true;
@@ -3015,7 +3015,7 @@ var Easyrtc = function() {
                 // Chrome and Firefox Interop is passing a event with a strange data="", perhaps
                 // as it's own form of priming message. Comparing the data against "" doesn't
                 // work, so I'm going with parsing and trapping the parse error.
-                // 
+                //
                 try {
                     var msg = JSON.parse(event.data);
                     if (msg) {
@@ -3113,7 +3113,7 @@ var Easyrtc = function() {
         var doDataChannels = dataEnabled;
         if (doDataChannels) {
 
-            // check if both sides have the same browser and versions 
+            // check if both sides have the same browser and versions
         }
 
         if (doDataChannels) {
@@ -3449,12 +3449,14 @@ var Easyrtc = function() {
                     self.debugPrinter("offer accept=" + wasAccepted);
                 }
                 delete offersPending[caller];
-                if (!self.supportsPeerConnections()) {
-                    callFailureCB(self.errCodes.CALL_ERR, self.getConstantString("noWebrtcSupport"));
-                    return;
-                }
 
                 if (wasAccepted) {
+
+                    if (!self.supportsPeerConnections()) {
+                        easyrtc.showError(self.errCodes.CALL_ERR, self.getConstantString("noWebrtcSupport"));
+                        return;
+                    }
+
                     doAnswer(caller, msgData);
                     flushCachedCandidates(caller);
                 }
@@ -4039,7 +4041,7 @@ var Easyrtc = function() {
     function sendAuthenticate(successCallback, errorCallback) {
         //
         // find our easyrtcsid
-        //  
+        //
         var cookies, target, i;
         var easyrtcsid = null;
         if (self.cookieId && document.cookie) {
@@ -4563,5 +4565,5 @@ easyrtc_constantStrings = {
   "statsNotSupported":"call statistics not supported by this browser, try Chrome.",
    "noWebrtcSupport":"Your browser doesn't appear to support WebRTC.",
    "gumFailed":"Failed to get access to local media. Error code was {0}.",
-   "requireAudioOrVideo":"At least one of audio and video must be provided"   
+   "requireAudioOrVideo":"At least one of audio and video must be provided"
 };
