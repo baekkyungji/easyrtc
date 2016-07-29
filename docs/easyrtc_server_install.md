@@ -5,10 +5,9 @@ Ubuntu EasyRTC Install Steps:
 ----------------------------
 
 1. Install Node.js
-    - `sudo apt-get install python-software-properties`
-    - `sudo add-apt-repository ppa:chris-lea/node.js`
-    - `sudo apt-get update`
-    - `sudo apt-get install nodejs`
+    - See https://github.com/joyent/node/wiki/Installing-Node.js-via-package-manager
+    - `curl -sL https://deb.nodesource.com/setup | sudo bash -`
+    - `sudo apt-get install -y nodejs`
 
 2. Create folder hold the EasyRTC application
     - ex: `sudo mkdir /var/nodes`
@@ -132,6 +131,7 @@ Below is a small upstart script which can be saved as /etc/init/easyrtc.conf
 
     script
         # Note: To run as a non root user, use exec sudo -u USERNAME node /var/nodes/easyrtc/server.js
+        # If nodejs is installed using Ubuntu's nodejs package, change /usr/bin/node to /usr/bin/nodejs
         exec /usr/bin/node /var/nodes/easyrtc/server.js
     end script
 
@@ -163,6 +163,10 @@ Below is the initial server program which will run an EasyRTC server along with 
     var express = require("express");           // web framework external module
     var io      = require("socket.io");         // web socket external module
     var easyrtc = require("easyrtc");           // EasyRTC external module
+
+    // Setup and configure Express http server. Expect a subfolder called "static" to be the web root.
+    var httpApp = express();
+    httpApp.use(express.static(__dirname + "/static/"));
 
     // Start Express http server on port 8080
     var webServer = http.createServer(httpApp).listen(8080);
@@ -208,4 +212,4 @@ If You Run Into Problems
 ------------------------
 Please feel free to post on our discussion forum:
 
- - [https://groups.google.com/forum/#!forum/easyrtc](https://groups.google.com/forum/#!forum/easyrtc)
+ - [https://easyrtc.com/forums/](https://easyrtc.com/forums/)

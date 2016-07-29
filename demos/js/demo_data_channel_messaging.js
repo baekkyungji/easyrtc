@@ -1,5 +1,5 @@
 //
-//Copyright (c) 2014, Priologic Software Inc.
+//Copyright (c) 2015, Skedans Systems, Inc.
 //All rights reserved.
 //
 //Redistribution and use in source and binary forms, with or without
@@ -108,8 +108,12 @@ function convertListToButtons(roomName, occupantList, isPrimary) {
 
 function updateButtonState(otherEasyrtcid) {
     var isConnected = channelIsActive[otherEasyrtcid];
-    document.getElementById('connect_' + otherEasyrtcid).disabled = isConnected;
-    document.getElementById('send_' + otherEasyrtcid).disabled = !isConnected;
+    if(document.getElementById('connect_' + otherEasyrtcid)) {
+        document.getElementById('connect_' + otherEasyrtcid).disabled = isConnected;
+    }
+    if( document.getElementById('send_' + otherEasyrtcid)) {
+        document.getElementById('send_' + otherEasyrtcid).disabled = !isConnected;
+    }
 }
 
 

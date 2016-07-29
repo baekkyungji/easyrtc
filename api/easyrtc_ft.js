@@ -1,10 +1,10 @@
 /** @class
- *@version 1.0.11
+ *@version 1.0.17
  *<p>
  * Provides support file and data transfer support to easyrtc.
  * </p>
  *<p>
- *copyright Copyright (c) 2014, Priologic Software Inc.
+ *copyright Copyright (c) 2015, Priologic Software Inc.
  *All rights reserved.</p>
  *
  *<p>
@@ -33,7 +33,7 @@
  *</p>
  */
 
-
+/* global easyrtc */ // easyrtc.js
 var easyrtc_ft = {};
 
 /**
@@ -54,6 +54,27 @@ easyrtc_ft.buildDragNDropRegion = function(droptargetName, filesHandler) {
         droptarget = droptargetName;
     }
 
+    function addClass(target, classname) {
+        if (target.className) {
+            if (target.className.indexOf(classname, 0) >= 0) {
+                return;
+            }
+            else {
+                target.className = target.className + " " + classname;
+            }
+        }
+        else {
+            target.className = classname;
+        }
+        target.className = target.className.replace("  ", " ");
+    }
+
+    function removeClass(target, classname) {
+        if (!target.className) {
+            return;
+        }
+        target.className = target.className.replace(classname, "").replace("  ", " ");
+    }
 
     function ignore(e) {
         e.stopPropagation();
@@ -62,11 +83,14 @@ easyrtc_ft.buildDragNDropRegion = function(droptargetName, filesHandler) {
     }
 
     function drageventcancel(e) {
-        if (e.preventDefault)
+        if (e.preventDefault) {
             e.preventDefault(); // required by FF + Safari
+        }
         e.dataTransfer.dropEffect = 'copy'; // tells the browser what drop effect is allowed here
         return false; // required by IE
     }
+
+    var dropCueClass = "easyrtcfiledrop";
 
     function dropHandler(e) {
         removeClass(droptarget, dropCueClass);
@@ -82,14 +106,10 @@ easyrtc_ft.buildDragNDropRegion = function(droptargetName, filesHandler) {
         return ignore(e);
     }
 
-
-    var dropCueClass = "easyrtcfiledrop";
-
     function dragEnterHandler(e) {
         addClass(droptarget, dropCueClass);
         return drageventcancel(e);
     }
-
 
     function dragLeaveHandler(e) {
         removeClass(droptarget, dropCueClass);
@@ -126,28 +146,6 @@ easyrtc_ft.buildDragNDropRegion = function(droptargetName, filesHandler) {
     droptarget.ondragenter = dragEnterHandler;
     droptarget.ondragleave = dragLeaveHandler;
     droptarget.ondragover = drageventcancel;
-
-    function addClass(target, classname) {
-        if (target.className) {
-            if (target.className.indexOf(classname, 0) >= 0) {
-                return;
-            }
-            else {
-                target.className = target.className + " " + classname;
-            }
-        }
-        else {
-            target.className = classname;
-        }
-        target.className = target.className.replace("  ", " ");
-    }
-
-    function removeClass(target, classname) {
-        if (!target.className) {
-            return;
-        }
-        target.className = target.className.replace(classname, "").replace("  ", " ");
-    }
 };
 
 /**
@@ -175,11 +173,138 @@ easyrtc_ft.buildFileSender = function(destUser, progressListener) {
     var curFile = null;
     var curFileSize;
     var filesAreBinary;
-    var maxChunkSize = 10 * 1024;
+    //
+    //  maxPacketSize is the size (before base64 encoding) that is sent in a 
+    //               single data channel message, in bytes.
+    //  maxChunkSize is the amount read from a file at a time, in bytes.
+    //  ackThreshold is the amount of data that can be sent before an ack is 
+    //               received from the party we're sending to, bytes.
+    //  maxChunkSize should be a multiple of maxPacketSize.
+    //  ackThreshold should be several times larger than maxChunkSize. For 
+    //               network paths that have greater latency, increase 
+    //               ackThreshold further.
+    // 
+    var maxPacketSize = 40*1024; // max bytes per packet, before base64 encoding
+    var maxChunkSize = maxPacketSize * 10; // max binary bytes read at a time.
     var waitingForAck = false;
-    var ackThreshold = 100 * 1024; // send is allowed to be 150KB ahead of receiver
+    var ackThreshold = maxChunkSize * 4; // send is allowed to be 400KB ahead of receiver
     var filesWaiting = [];
     var haveFilesWaiting = false;
+    var outseq = 0;
+
+    function sendFilesOffer(files, areBinary) {
+        if (haveFilesWaiting) {
+            filesWaiting.push({files: files, areBinary: areBinary});
+        }
+        else {
+            haveFilesWaiting = true;
+            filesAreBinary = areBinary;
+            progressListener({status: "waiting"});
+            var fileNameList = [];
+            for (var i = 0; i < files.length; i++) {
+                fileNameList[i] = {name: files[i].name, size: files[i].size};
+            }
+            seq++;
+            filesOffered[seq] = files;
+            easyrtc.sendDataWS(destUser, "filesOffer", {seq: seq, fileNameList: fileNameList});
+        }
+    }
+
+    function sendFilesWaiting() {
+        haveFilesWaiting = false;
+        if (filesWaiting.length > 0) {
+            setTimeout(function() {
+                var fileset = filesWaiting.shift();
+                sendFilesOffer(fileset.files, fileset.areBinary);
+            }, 240);
+        }
+    }
+
+    function sendChunk() {
+        if (!curFile) {
+            if (filesBeingSent.length === 0) {
+                outseq = 0;
+                easyrtc.sendData(destUser, "filesChunk", {done: "all"});
+                filesOffered.length = 0;
+                progressListener({status: "done"});
+                sendFilesWaiting();
+                return;
+            }
+            else {
+                curFile = filesBeingSent.shift();
+                progressListener({status: "started_file", name: curFile.name});
+                curFileSize = curFile.size;
+                positionAcked = 0;
+                waitingForAck = false;
+                easyrtc.sendData(destUser, "filesChunk", {name: curFile.name, type: curFile.type, outseq: outseq, size: curFile.size});
+                outseq++;
+            }
+        }
+
+        var amountToRead = Math.min(maxChunkSize, curFileSize - filePosition);
+        if (!progressListener({status: "working", name: curFile.name, position: filePosition, size: curFileSize, numFiles: filesBeingSent.length + 1})) {
+            filesOffered.length = 0;
+            filePosition = 0;
+            easyrtc.sendData(destUser, "filesChunk", {done: "cancelled"});
+            sendFilesWaiting();
+            return;
+        }
+
+        var nextLocation = filePosition + amountToRead;
+        var blobSlice = curFile.slice(filePosition, nextLocation);
+
+        var reader = new FileReader();
+        reader.onloadend = function(evt) {
+            if (evt.target.readyState === FileReader.DONE) { // DONE == 2
+                
+                var binaryString = "";
+                var bytes = new Uint8Array(evt.target.result);
+                var length = bytes.length;
+                for( var i = 0; i < length; i++ ) {
+                   binaryString += String.fromCharCode(bytes[i]);
+                }
+                
+                for (var pp = 0; pp < binaryString.length; pp++) {
+                    var oneChar = binaryString.charCodeAt(pp);
+                }
+                for (var pos = 0; pos < binaryString.length; pos += maxPacketSize) {
+                    var packetLen = Math.min(maxPacketSize, amountToRead - pos);
+                    var packetData = binaryString.substring(pos, pos + packetLen);
+                    var packetObject = {outseq: outseq};
+                    if (filesAreBinary) {
+                        packetObject.data64 = btoa(packetData);
+                    }
+                    else {
+                        packetObject.datatxt = packetData;
+                    }
+                    easyrtc.sendData(destUser, "filesChunk", packetObject);
+                    outseq++;
+                }
+                if (nextLocation >= curFileSize) {
+                    easyrtc.sendData(destUser, "filesChunk", {done: "file"});
+                }
+                if (filePosition < positionAcked + ackThreshold) {
+                    sendChunk();
+                }
+                else {
+                    waitingForAck = true;
+                }
+            }
+        };
+
+        // reader.readAsBinaryString(blobSlice);
+        //
+        // contribution by Harold Thetiot to support IE10
+        //
+        reader.readAsArrayBuffer(blobSlice);
+        filePosition = nextLocation;
+
+        //  advance to the next file if we've read all of this file
+        if (nextLocation >= curFileSize) {
+            curFile = null;
+            filePosition = 0;
+        }
+    }
 
     if (!progressListener) {
         progressListener = function() {
@@ -207,8 +332,10 @@ easyrtc_ft.buildFileSender = function(destUser, progressListener) {
     // if a file offer is rejected, we delete references to it.
     //
     function fileOfferRejected(sender, msgType, msgData, targeting) {
-        if (!msgData.seq)
+        if (!msgData.seq) {
             return;
+        }
+
         delete filesOffered[msgData.seq];
         progressListener({status: "rejected"});
         filesOffered.length = 0;
@@ -218,8 +345,9 @@ easyrtc_ft.buildFileSender = function(destUser, progressListener) {
     // if a file offer is accepted, initiate sending of files.
     //
     function fileOfferAccepted(sender, msgType, msgData, targeting) {
-        if (!msgData.seq || !filesOffered[msgData.seq])
+        if (!msgData.seq || !filesOffered[msgData.seq]){
             return;
+        }
         var alreadySending = filesBeingSent.length > 0;
         for (var i = 0; i < filesOffered[msgData.seq].length; i++) {
             filesBeingSent.push(filesOffered[msgData.seq][i]);
@@ -253,122 +381,13 @@ easyrtc_ft.buildFileSender = function(destUser, progressListener) {
     easyrtc.setPeerListener(fileCancelReceived, "filesCancel", destUser);
     easyrtc.setPeerListener(packageAckReceived, "filesAck", destUser);
 
-
-    var outseq = 0;
-
-    function sendChunk() {
-        if (!curFile) {
-            if (filesBeingSent.length === 0) {
-                outseq = 0;
-                easyrtc.sendData(destUser, "filesChunk", {done: "all"});
-                filesOffered.length = 0;
-                progressListener({status: "done"});
-                sendFilesWaiting();
-                return;
-            }
-            else {
-                curFile = filesBeingSent.pop();
-                progressListener({status: "started_file", name: curFile.name});
-                curFileSize = curFile.size;
-                positionAcked = 0;
-                waitingForAck = false;
-                easyrtc.sendData(destUser, "filesChunk", {name: curFile.name, type: curFile.type, outseq: outseq, size: curFile.size});
-                outseq++;
-            }
-        }
-
-        var amountToRead = Math.min(maxChunkSize, curFileSize - filePosition);
-        if (!progressListener({status: "working", name: curFile.name, position: filePosition, size: curFileSize, numFiles: filesBeingSent.length + 1})) {
-            filesOffered.length = 0;
-            filePosition = 0;
-            easyrtc.sendData(destUser, "filesChunk", {done: "cancelled"});
-            sendFilesWaiting();
-            return;
-        }
-
-        var nextLocation = filePosition + amountToRead;
-        var blobSlice = curFile.slice(filePosition, nextLocation);
-        var reader = new FileReader();
-        reader.onloadend = function(evt) {
-            if (evt.target.readyState === FileReader.DONE) { // DONE == 2
-                var binaryString = evt.target.result;
-                var maxchar = 32, minchar = 32;
-                for (var pp = 0; pp < binaryString.length; pp++) {
-                    var oneChar = binaryString.charCodeAt(pp);
-                    maxchar = Math.max(maxchar, oneChar);
-                    minchar = Math.min(minchar, oneChar);
-                }
-                var maxPacketSize = 400; // size in bytes
-                for (var pos = 0; pos < binaryString.length; pos += maxPacketSize) {
-                    var packetLen = Math.min(maxPacketSize, amountToRead - pos);
-                    var packetData = binaryString.substring(pos, pos + packetLen);
-                    var packetObject = {outseq: outseq};
-                    if (filesAreBinary) {
-                        packetObject.data64 = btoa(packetData);
-                    }
-                    else {
-                        packetObject.datatxt = packetData;
-                    }
-                    easyrtc.sendData(destUser, "filesChunk", packetObject);
-                    outseq++;
-                }
-                if (nextLocation >= curFileSize) {
-                    easyrtc.sendData(destUser, "filesChunk", {done: "file"});
-                }
-                if (filePosition < positionAcked + ackThreshold) {
-                    sendChunk();
-                }
-                else {
-                    waitingForAck = true;
-                }
-            }
-        };
-
-        reader.readAsBinaryString(blobSlice);
-        filePosition = nextLocation;
-
-        //  advance to the next file if we've read all of this file
-        if (nextLocation >= curFileSize) {
-            curFile = null;
-            filePosition = 0;
-        }
-    }
-
-    function sendFilesWaiting() {
-        haveFilesWaiting = false;
-        if (filesWaiting.length > 0) {
-            setTimeout(function() {
-                var fileset = filesWaiting.pop();
-                sendFilesOffer(fileset.files, fileset.areBinary);
-            }, 240);
-        }
-    }
-    
-    
-    function sendFilesOffer(files, areBinary) {
-        if (haveFilesWaiting) {
-            filesWaiting.push({files: files, areBinary: areBinary});
-        }
-        else {
-            haveFilesWaiting = true;
-            filesAreBinary = areBinary;
-            progressListener({status: "waiting"});
-            var fileNameList = [];
-            for (var i = 0; i < files.length; i++) {
-                fileNameList[i] = {name: files[i].name, size: files[i].size};
-            }
-            seq++;
-            filesOffered[seq] = files;
-            easyrtc.sendDataWS(destUser, "filesOffer", {seq: seq, fileNameList: fileNameList});
-        }
-    }
     return sendFilesOffer;
 };
 
 
 /**
  * Enable datachannel based file receiving. The received blobs get passed to the statusCB in the 'eof' typed message.
- * @param {Function(otherGuy,fileNameList, wasAccepted} acceptRejectCB - this function is called when another peer
+ * @param {Function(otherGuy,fileNameList, wasAccepted)} acceptRejectCB - this function is called when another peer
  * (otherGuy) offers to send you a list of files. this function should call it's wasAccepted function with true to
  * allow those files to be sent, or false to disallow them.
  * @param {Function} blobAcceptor - this function is called three arguments arguments: the suppliers easyrtcid, a blob and a filename. It is responsible for
@@ -401,26 +420,31 @@ easyrtc_ft.buildFileReceiver = function(acceptRejectCB, blobAcceptor, statusCB) 
         var user;
         var foundUser;
         var roomName;
-        for (destUser in userStreams) {
-            foundUser = false;
-            for (roomName in eventData) {
-                if (eventData[roomName][destUser]) {
-                    foundUser = true;
+        for (var destUser in userStreams) {
+            if (userStreams.hasOwnProperty(destUser)) {                    
+                foundUser = false;
+                for (roomName in eventData) {
+                    if (eventData[roomName][destUser]) {
+                        foundUser = true;
+                    }
                 }
-            }
-            if (!foundUser) {
-                easyrtc.removeEventListener("roomOccupant", roomOccupantListener);
-                statusCB(destUser, {status: "done", reason: "cancelled"});
-                delete userStreams[destUser];
+                if (!foundUser) {
+                    easyrtc.removeEventListener("roomOccupant", roomOccupantListener);
+                    statusCB(destUser, {status: "done", reason: "cancelled"});
+                    delete userStreams[destUser];
+                }
             }
         }
     };
+
     easyrtc.addEventListener("roomOccupant", roomOccupantListener);
 
     function fileOfferHandler(otherGuy, msgType, msgData) {
+        
         if (!userStreams[otherGuy]) {
             userStreams[otherGuy] = {};
         }
+
         acceptRejectCB(otherGuy, msgData.fileNameList, function(wasAccepted) {
             var ackHandler = function(ackMesg) {
 
@@ -446,7 +470,6 @@ easyrtc_ft.buildFileReceiver = function(acceptRejectCB, blobAcceptor, statusCB) 
             }
         });
     }
-
 
     function fileChunkHandler(otherGuy, msgType, msgData) {
         var i;
@@ -524,6 +547,7 @@ easyrtc_ft.buildFileReceiver = function(acceptRejectCB, blobAcceptor, statusCB) 
  * @param {String} filename - the name of the file the blob should be written to.
  */
 easyrtc_ft.saveAs = (function() {
+
     /* FileSaver.js
      * A saveAs() FileSaver implementation.
      * 2013-01-23
@@ -538,39 +562,38 @@ easyrtc_ft.saveAs = (function() {
      plusplus: true */
 
     /*! @source http://purl.eligrey.com/github/FileSaver.js/blob/master/FileSaver.js */
+    var saveAs = window.saveAs || (navigator.msSaveOrOpenBlob && navigator.msSaveOrOpenBlob.bind(navigator)) || (function(view) {
+            
+        
 
-    var saveAs = window.saveAs
-            || (navigator.msSaveOrOpenBlob && navigator.msSaveOrOpenBlob.bind(navigator))
-            || (function(view) {
+        var doc = view.document,
+            // only get URL when necessary in case BlobBuilder.js hasn't overridden it yet
+            get_URL = function () {
+                return view.URL || view.webkitURL || view;
+            },
+            URL = view.URL || view.webkitURL || view,
+            save_link = doc.createElementNS("http://www.w3.org/1999/xhtml", "a"),
+            can_use_save_link = !view.externalHost && "download" in save_link,
+            click = function(node) {
+                var event = doc.createEvent("MouseEvents");
+                event.initMouseEvent(
+                    "click", true, false, view, 0, 0, 0, 0, 0,
+                    false, false, false, false, 0, null
+                );
+                node.dispatchEvent(event);
+            },
+            webkit_req_fs = view.webkitRequestFileSystem,
+            req_fs = view.requestFileSystem || webkit_req_fs || view.mozRequestFileSystem,
+            throw_outside = function(ex) {
+                (view.setImmediate || view.setTimeout)(function() {
+                    throw ex;
+                }, 0);
+            },
+            force_saveable_type = "application/octet-stream",
+            fs_min_size = 0,
+            deletion_queue = [];
 
-        var
-                doc = view.document
-                // only get URL when necessary in case BlobBuilder.js hasn't overridden it yet
-                , get_URL = function() {
-            return view.URL || view.webkitURL || view;
-        }
-        , URL = view.URL || view.webkitURL || view
-                , save_link = doc.createElementNS("http://www.w3.org/1999/xhtml", "a")
-                , can_use_save_link = !view.externalHost && "download" in save_link
-                , click = function(node) {
-            var event = doc.createEvent("MouseEvents");
-            event.initMouseEvent(
-                    "click", true, false, view, 0, 0, 0, 0, 0
-                    , false, false, false, false, 0, null
-                    );
-            node.dispatchEvent(event);
-        }
-        , webkit_req_fs = view.webkitRequestFileSystem
-                , req_fs = view.requestFileSystem || webkit_req_fs || view.mozRequestFileSystem
-                , throw_outside = function(ex) {
-            (view.setImmediate || view.setTimeout)(function() {
-                throw ex;
-            }, 0);
-        }
-        , force_saveable_type = "application/octet-stream"
-                , fs_min_size = 0
-                , deletion_queue = []
-                , process_deletion_queue = function() {
+        function process_deletion_queue() {
             var i = deletion_queue.length;
             while (i--) {
                 var file = deletion_queue[i];
@@ -582,7 +605,8 @@ easyrtc_ft.saveAs = (function() {
             }
             deletion_queue.length = 0; // clear queue
         }
-        , dispatch = function(filesaver, event_types, event) {
+
+        function dispatch(filesaver, event_types, event) {
             event_types = [].concat(event_types);
             var i = event_types.length;
             while (i--) {
@@ -596,53 +620,55 @@ easyrtc_ft.saveAs = (function() {
                 }
             }
         }
-        , FileSaver = function(blob, name) {
+
+        function FileSaver(blob, name) {
             // First try a.download, then web filesystem, then object URLs
-            var
-                    filesaver = this
-                    , type = blob.type
-                    , blob_changed = false
-                    , object_url
-                    , target_view
-                    , get_object_url = function() {
-                var object_url = get_URL().createObjectURL(blob);
-                deletion_queue.push(object_url);
-                return object_url;
-            }
-            , dispatch_all = function() {
-                dispatch(filesaver, "writestart progress write writeend".split(" "));
-            }
-            // on any filesys errors revert to saving with object URLs
-            , fs_error = function() {
-                // don't create more object URLs than needed
-                if (blob_changed || !object_url) {
-                    object_url = get_object_url(blob);
-                }
-                if (target_view) {
-                    target_view.location.href = object_url;
-                } else {
-                    window.open(object_url, "_blank");
-                }
-                filesaver.readyState = filesaver.DONE;
-                dispatch_all();
-            }
-            , abortable = function(func) {
-                return function() {
-                    if (filesaver.readyState !== filesaver.DONE) {
-                        return func.apply(this, arguments);
+            var filesaver = this, 
+                type = blob.type, 
+                blob_changed = false, 
+                object_url, 
+                target_view, 
+                get_object_url = function() {
+                    var object_url = get_URL().createObjectURL(blob);
+                    deletion_queue.push(object_url);
+                    return object_url;
+                }, 
+                dispatch_all = function() {
+                    dispatch(filesaver, "writestart progress write writeend".split(" "));
+                }, 
+                // on any filesys errors revert to saving with object URLs
+                fs_error = function() {
+                    // don't create more object URLs than needed
+                    if (blob_changed || !object_url) {
+                        object_url = get_object_url(blob);
                     }
-                    else {
-                        return null;
+                    if (target_view) {
+                        target_view.location.href = object_url;
+                    } else {
+                        window.open(object_url, "_blank");
                     }
-                };
-            }
-            , create_if_not_found = {create: true, exclusive: false}
-            , slice
-                    ;
+                    filesaver.readyState = filesaver.DONE;
+                    dispatch_all();
+                }, 
+                abortable = function(func) {
+                    return function() {
+                        if (filesaver.readyState !== filesaver.DONE) {
+                            return func.apply(this, arguments);
+                        }
+                        else {
+                            return null;
+                        }
+                    };
+                }, 
+                create_if_not_found = {create: true, exclusive: false}, 
+                slice;
+
             filesaver.readyState = filesaver.INIT;
+            
             if (!name) {
                 name = "download";
             }
+            
             if (can_use_save_link) {
                 object_url = get_object_url(blob);
                 save_link.href = object_url;
@@ -717,31 +743,34 @@ easyrtc_ft.saveAs = (function() {
                 }), fs_error);
             }), fs_error);
         }
-        , FS_proto = FileSaver.prototype
-                , saveAs = function(blob, name) {
+
+        function saveAs(blob, name) {
             return new FileSaver(blob, name);
         }
-        ;
+
+        var FS_proto = FileSaver.prototype;
+
         FS_proto.abort = function() {
             var filesaver = this;
             filesaver.readyState = filesaver.DONE;
             dispatch(filesaver, "abort");
         };
+        
         FS_proto.readyState = FS_proto.INIT = 0;
         FS_proto.WRITING = 1;
         FS_proto.DONE = 2;
-
-        FS_proto.error =
-                FS_proto.onwritestart =
-                FS_proto.onprogress =
-                FS_proto.onwrite =
-                FS_proto.onabort =
-                FS_proto.onerror =
-                FS_proto.onwriteend =
-                null;
+        FS_proto.error = null;
+        FS_proto.onwritestart = null;
+        FS_proto.onprogress = null;
+        FS_proto.onwrite = null;
+        FS_proto.onabort = null;
+        FS_proto.onerror = null;
+        FS_proto.onwriteend = null;
 
         view.addEventListener("unload", process_deletion_queue, false);
+
         return saveAs;
+
     }(self));
 
     return saveAs;
